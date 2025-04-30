@@ -9,6 +9,7 @@ import 'package:mad_exam_22it123/services/encryption_service.dart';
 import 'package:mad_exam_22it123/services/sync_service.dart';
 import 'package:mad_exam_22it123/services/notification_service.dart';
 import 'package:mad_exam_22it123/services/mock_data_service.dart';
+import 'package:mad_exam_22it123/services/offline_service.dart';
 
 // Manual Hive adapter for LoyaltyCard
 class LoyaltyCardAdapter extends TypeAdapter<LoyaltyCard> {
@@ -105,6 +106,7 @@ class CardProvider with ChangeNotifier {
   final EncryptionService _encryptionService = EncryptionService();
   final SyncService _syncService = SyncService();
   final NotificationService _notificationService = NotificationService();
+  final OfflineService _offlineService = OfflineService();
   
   List<LoyaltyCard> _cards = [];
   bool _isLoading = false;
@@ -155,6 +157,17 @@ class CardProvider with ChangeNotifier {
     try {
       _setLoading(true);
       
+      // Initialize services
+      await _encryptionService.init();
+      await _offlineService.init();
+      await _syncService.init();
+      
+      // Subscribe to sync status updates
+      _syncService.syncStatusStream.listen((status) {
+        _isSyncing = status.isActive;
+        notifyListeners();
+      });
+      
       // initialize Hive
       await Hive.initFlutter();
       
@@ -181,7 +194,14 @@ class CardProvider with ChangeNotifier {
         _cards = box.values.toList();
       }
       
-      // check for expiring cards
+      // Check all cards for expiration and set up reminders
+      for (final card in _cards) {
+        if (card.expirationDate != null) {
+          await _notificationService.scheduleExpirationReminder(card);
+        }
+      }
+      
+      // check for expiring cards for immediate notifications
       _notificationService.checkForExpiringCards(_cards);
       
       // sync with server if online
@@ -214,8 +234,35 @@ class CardProvider with ChangeNotifier {
       _cards.add(encryptedCard);
       notifyListeners();
       
+      // Cache card data for offline access
+      if (card.imagePath != null) {
+        await _offlineService.cacheCardImage(card.id, card.imagePath);
+      }
+      await _offlineService.cacheBarcode(card.id, card.barcode, card.barcodeType);
+      
+      // Schedule expiration reminders if applicable
+      if (card.expirationDate != null) {
+        await _notificationService.scheduleExpirationReminder(card);
+      }
+      
       // try to sync with server
-      _trySyncCard(encryptedCard);
+      final syncSuccess = await _syncService.pushCard(encryptedCard);
+      
+      if (!syncSuccess) {
+        // If sync fails, queue for later syncing
+        await _offlineService.queuePendingChange(card.id, 'add');
+      } else {
+        // Mark as synced if successful
+        final syncedCard = encryptedCard.markAsSynced();
+        await box.put(card.id, syncedCard);
+        
+        // Update in-memory list
+        final index = _cards.indexWhere((c) => c.id == card.id);
+        if (index != -1) {
+          _cards[index] = syncedCard;
+          notifyListeners();
+        }
+      }
     } catch (e) {
       _setError('Failed to add card: $e');
     }
@@ -257,8 +304,38 @@ class CardProvider with ChangeNotifier {
         notifyListeners();
       }
       
+      // Check if expiration date changed and update reminders
+      final oldCard = getCardById(updatedCard.id);
+      if (oldCard != null && 
+          oldCard.expirationDate != updatedCard.expirationDate &&
+          updatedCard.expirationDate != null) {
+        await _notificationService.scheduleExpirationReminder(updatedCard);
+      }
+      
+      // Cache for offline access
+      if (updatedCard.imagePath != null) {
+        await _offlineService.cacheCardImage(updatedCard.id, updatedCard.imagePath);
+      }
+      await _offlineService.cacheBarcode(updatedCard.id, updatedCard.barcode, updatedCard.barcodeType);
+      
       // try to sync with server
-      _trySyncCard(encryptedCard);
+      final syncSuccess = await _syncService.pushCard(encryptedCard);
+      
+      if (!syncSuccess) {
+        // If sync fails, queue for later syncing
+        await _offlineService.queuePendingChange(updatedCard.id, 'update');
+      } else {
+        // Mark as synced if successful
+        final syncedCard = encryptedCard.markAsSynced();
+        await box.put(updatedCard.id, syncedCard);
+        
+        // Update in-memory list
+        final index = _cards.indexWhere((c) => c.id == updatedCard.id);
+        if (index != -1) {
+          _cards[index] = syncedCard;
+          notifyListeners();
+        }
+      }
     } catch (e) {
       _setError('Failed to update card: $e');
     }
@@ -267,6 +344,9 @@ class CardProvider with ChangeNotifier {
   // delete a card
   Future<void> deleteCard(String id) async {
     try {
+      // Queue delete operation in case we're offline
+      await _offlineService.queuePendingChange(id, 'delete');
+      
       // delete from local storage
       final box = await Hive.openBox<LoyaltyCard>(_boxName);
       await box.delete(id);
@@ -274,6 +354,26 @@ class CardProvider with ChangeNotifier {
       // delete from cards list
       _cards.removeWhere((card) => card.id == id);
       notifyListeners();
+      
+      // Try to sync deletion with server
+      if (await _syncService.isConnected()) {
+        bool success = await _syncService.pushCard(
+          LoyaltyCard(
+            id: id,
+            name: 'deleted',
+            issuer: 'deleted',
+            cardNumber: 'deleted',
+            barcode: 'deleted',
+            isSynced: false,
+            lastModified: DateTime.now(),
+          )
+        );
+        
+        if (success) {
+          // Remove from pending changes
+          await _offlineService.clearPendingChange(id);
+        }
+      }
     } catch (e) {
       _setError('Failed to delete card: $e');
     }
@@ -332,30 +432,16 @@ class CardProvider with ChangeNotifier {
     }
   }
   
-  // try to sync a single card
-  Future<void> _trySyncCard(LoyaltyCard card) async {
-    if (await _syncService.isConnected()) {
-      final success = await _syncService.pushCard(card);
-      if (success) {
-        // update sync status
-        final syncedCard = card.markAsSynced();
-        final box = await Hive.openBox<LoyaltyCard>(_boxName);
-        await box.put(card.id, syncedCard);
-        
-        // update in cards list
-        final index = _cards.indexWhere((c) => c.id == card.id);
-        if (index != -1) {
-          _cards[index] = syncedCard;
-          notifyListeners();
-        }
-      }
-    }
-  }
-  
   // sync all cards with server
   Future<void> syncWithServer() async {
     try {
       _setSyncing(true);
+      
+      // First, check if we're online
+      if (!await _syncService.isConnected()) {
+        _setSyncing(false);
+        return;
+      }
       
       // sync offline changes to server
       final syncedIds = await _syncService.syncOfflineChanges(_cards);
@@ -370,6 +456,9 @@ class CardProvider with ChangeNotifier {
             final syncedCard = card.markAsSynced();
             await box.put(id, syncedCard);
             
+            // Clear from pending changes
+            await _offlineService.clearPendingChange(id);
+            
             // update in cards list
             final index = _cards.indexWhere((c) => c.id == id);
             if (index != -1) {
@@ -377,6 +466,8 @@ class CardProvider with ChangeNotifier {
             }
           }
         }
+        
+        notifyListeners();
       }
       
       // get updates from server
@@ -406,6 +497,18 @@ class CardProvider with ChangeNotifier {
           if (index != -1) {
             _cards[index] = encryptedCard;
           }
+          
+          // Set up expiration reminders
+          if (encryptedCard.expirationDate != null) {
+            await _notificationService.scheduleExpirationReminder(encryptedCard);
+          }
+          
+          // Cache for offline access
+          await _offlineService.cacheBarcode(
+            encryptedCard.id, 
+            updatedCard.barcode, 
+            encryptedCard.barcodeType
+          );
         }
         
         // add new cards
@@ -424,6 +527,18 @@ class CardProvider with ChangeNotifier {
           
           // add to cards list
           _cards.add(encryptedCard);
+          
+          // Set up expiration reminders
+          if (encryptedCard.expirationDate != null) {
+            await _notificationService.scheduleExpirationReminder(encryptedCard);
+          }
+          
+          // Cache for offline access
+          await _offlineService.cacheBarcode(
+            encryptedCard.id, 
+            newCard.barcode, 
+            encryptedCard.barcodeType
+          );
         }
         
         // notify listeners if any changes

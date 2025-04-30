@@ -3,6 +3,7 @@ import 'package:mad_exam_22it123/models/loyalty_card.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
 import 'dart:async';
+import 'package:intl/intl.dart';
 
 // Mock RemoteMessage for demo purposes
 class MockRemoteMessage {
@@ -90,6 +91,10 @@ class NotificationService {
   
   // initialize notification services
   Future<void> init() async {
+    // Initialize timezone
+    tz_data.initializeTimeZones();
+    tz.setLocalLocation(tz.getLocation('America/New_York')); // Set a default timezone
+    
     // local notifications setup
     const androidSettings = AndroidInitializationSettings('app_icon');
     const iosSettings = DarwinInitializationSettings(
@@ -215,6 +220,123 @@ class NotificationService {
       body: promoDetails,
     );
   }
+  
+  // show notification for reward milestone achievement
+  Future<void> showRewardMilestone(String cardName, int points, String reward) async {
+    await showNotification(
+      id: DateTime.now().millisecondsSinceEpoch.hashCode,
+      title: 'Reward Milestone Reached! 🎉',
+      body: 'You\'ve earned $points points on your $cardName card. Redeem for: $reward',
+      payload: 'reward_milestone_$cardName',
+    );
+  }
+  
+  // show notification for points update
+  Future<void> showPointsUpdate(String cardName, int newPoints, int pointsChange) async {
+    if (pointsChange <= 0) return; // Only notify for positive changes
+    
+    await showNotification(
+      id: DateTime.now().millisecondsSinceEpoch.hashCode,
+      title: 'Points Updated',
+      body: 'You\'ve earned +$pointsChange points on your $cardName card. New balance: $newPoints',
+      payload: 'points_update_$cardName',
+    );
+  }
+  
+  // schedule expiration reminder well before the card expires
+  Future<void> scheduleExpirationReminder(LoyaltyCard card) async {
+    if (card.expirationDate == null) return;
+    
+    final daysUntilExpiration = card.expirationDate!.difference(DateTime.now()).inDays;
+    
+    // Schedule multiple reminders at different intervals before expiration
+    if (daysUntilExpiration > 30) {
+      // Schedule a reminder for 30 days before expiration
+      final reminderDate = card.expirationDate!.subtract(const Duration(days: 30));
+      await _scheduleNotification(
+        id: '${card.id}_30days'.hashCode,
+        title: 'Card Expiring Soon',
+        body: '${card.name} will expire in 30 days on ${_dateFormat.format(card.expirationDate!)}',
+        scheduledDate: reminderDate,
+        payload: card.id,
+      );
+    }
+    
+    if (daysUntilExpiration > 7) {
+      // Schedule a reminder for 7 days before expiration
+      final reminderDate = card.expirationDate!.subtract(const Duration(days: 7));
+      await _scheduleNotification(
+        id: '${card.id}_7days'.hashCode,
+        title: 'Card Expiring Very Soon',
+        body: '${card.name} will expire in 7 days on ${_dateFormat.format(card.expirationDate!)}',
+        scheduledDate: reminderDate,
+        payload: card.id,
+      );
+    }
+    
+    // Final reminder 1 day before
+    if (daysUntilExpiration > 1) {
+      final reminderDate = card.expirationDate!.subtract(const Duration(days: 1));
+      await _scheduleNotification(
+        id: '${card.id}_1day'.hashCode,
+        title: 'Card Expires Tomorrow',
+        body: '${card.name} will expire tomorrow! Use it before it\'s too late.',
+        scheduledDate: reminderDate,
+        payload: card.id,
+      );
+    }
+  }
+  
+  // schedule a notification for a specific date/time
+  Future<void> _scheduleNotification({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledDate,
+    String? payload,
+  }) async {
+    // Only proceed if date is in the future
+    if (scheduledDate.isBefore(DateTime.now())) {
+      return;
+    }
+    
+    // Android notification details
+    const androidDetails = AndroidNotificationDetails(
+      'loyalty_cards_channel',
+      'Loyalty Cards',
+      channelDescription: 'Notifications related to loyalty cards',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    
+    // iOS notification details
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    
+    const notificationDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+    
+    // Schedule the notification
+    await _flutterLocalNotificationsPlugin.zonedSchedule(
+      id,
+      title,
+      body,
+      tz.TZDateTime.from(scheduledDate, tz.local),
+      notificationDetails,
+      payload: payload,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation: 
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+  }
+  
+  // test date formatter
+  final _dateFormat = DateFormat('MM/dd/yyyy');
   
   // simulate a push notification (for testing)
   void simulatePushNotification(String title, String body) {

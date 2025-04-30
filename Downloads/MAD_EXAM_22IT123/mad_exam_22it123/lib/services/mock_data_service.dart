@@ -33,7 +33,7 @@ class MockDataService {
         category: CardCategory.retail,
         barcodeType: BarcodeType.barcode,
         lastUsed: DateTime(now.year, now.month, 5), // used recently
-        notes: 'Free delivery on orders over $35',
+        notes: 'Free delivery on orders over \$35',
         isSynced: true,
       ),
       
