@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:mad_exam_22it123/providers/card_provider.dart';
 import 'package:mad_exam_22it123/screens/home_screen.dart';
+import 'package:mad_exam_22it123/screens/category_screen.dart';
 import 'package:mad_exam_22it123/screens/settings_screen.dart';
+import 'package:mad_exam_22it123/screens/offers_screen.dart';
 import 'package:mad_exam_22it123/services/notification_service.dart';
 
 // mock firebase initialization for demo purposes
@@ -83,6 +85,8 @@ class _MainScreenState extends State<MainScreen> {
   // screens to show
   final List<Widget> _screens = [
     const HomeScreen(),
+    const OffersScreen(),
+    const CategoryScreen(),
     const SettingsScreen(),
   ];
   
@@ -91,6 +95,14 @@ class _MainScreenState extends State<MainScreen> {
     const BottomNavigationBarItem(
       icon: Icon(Icons.credit_card),
       label: 'Cards',
+    ),
+    const BottomNavigationBarItem(
+      icon: Icon(Icons.local_offer),
+      label: 'Offers',
+    ),
+    const BottomNavigationBarItem(
+      icon: Icon(Icons.category),
+      label: 'Categories',
     ),
     const BottomNavigationBarItem(
       icon: Icon(Icons.settings),
@@ -118,6 +130,7 @@ class _MainScreenState extends State<MainScreen> {
         selectedItemColor: Theme.of(context).colorScheme.primary,
         unselectedItemColor: Colors.grey,
         showUnselectedLabels: true,
+        type: BottomNavigationBarType.fixed,
       ),
     );
   }

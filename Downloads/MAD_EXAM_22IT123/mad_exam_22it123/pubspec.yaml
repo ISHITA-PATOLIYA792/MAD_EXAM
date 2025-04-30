@@ -53,6 +53,7 @@ dependencies:
   # network
   connectivity_plus: ^5.0.2
   http: ^1.2.0
+  url_launcher: ^6.2.5
   
   # ui components
   image_picker: ^1.0.7

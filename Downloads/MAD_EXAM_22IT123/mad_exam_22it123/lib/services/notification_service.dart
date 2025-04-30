@@ -1,5 +1,7 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:mad_exam_22it123/models/loyalty_card.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz_data;
 import 'dart:async';
 
 // Mock RemoteMessage for demo purposes
@@ -194,7 +196,7 @@ class NotificationService {
   Future<void> checkForExpiringCards(List<LoyaltyCard> cards) async {
     for (final card in cards) {
       if (card.isExpiringSoon) {
-        final daysLeft = card.expirationDate.difference(DateTime.now()).inDays;
+        final daysLeft = card.expirationDate?.difference(DateTime.now()).inDays ?? 0;
         await showNotification(
           id: card.id.hashCode,
           title: 'Card Expiring Soon',

@@ -1,10 +1,14 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:mad_exam_22it123/models/loyalty_card.dart';
 import 'package:mad_exam_22it123/services/encryption_service.dart';
 
+// mock service to simulate sync with a server
 class SyncService {
+  final Random _random = Random();
+  
   // singleton instance
   static final SyncService _instance = SyncService._internal();
   factory SyncService() => _instance;
@@ -16,115 +20,56 @@ class SyncService {
   final _encryptionService = EncryptionService();
   final _sensitiveFields = ['cardNumber', 'barcode'];
 
-  // check internet connectivity
+  // check if device is connected to the internet
   Future<bool> isConnected() async {
     final connectivityResult = await Connectivity().checkConnectivity();
     return connectivityResult != ConnectivityResult.none;
   }
-
-  // pull all cards from server
-  Future<List<LoyaltyCard>> fetchCards() async {
-    if (!await isConnected()) {
-      throw Exception('No internet connection');
-    }
-
-    try {
-      // simulate API call with delay
-      await Future.delayed(const Duration(seconds: 1));
-      
-      // mock response for simulation
-      final mockResponse = {
-        'status': 'success',
-        'data': [
-          {
-            'id': '1',
-            'name': 'Starbucks',
-            'cardNumber': 'SB1234567890',
-            'barcode': '987654321',
-            'expirationDate': DateTime.now().add(const Duration(days: 365)).toIso8601String(),
-            'imagePath': null,
-            'createdAt': DateTime.now().subtract(const Duration(days: 30)).toIso8601String(),
-            'lastModified': DateTime.now().subtract(const Duration(days: 10)).toIso8601String(),
-          },
-          {
-            'id': '2',
-            'name': 'Target',
-            'cardNumber': 'TG0987654321',
-            'barcode': '123456789',
-            'expirationDate': DateTime.now().add(const Duration(days: 180)).toIso8601String(),
-            'imagePath': null,
-            'createdAt': DateTime.now().subtract(const Duration(days: 60)).toIso8601String(),
-            'lastModified': DateTime.now().subtract(const Duration(days: 15)).toIso8601String(),
-          }
-        ]
-      };
-
-      // in real app, make actual http request
-      // final response = await http.get(Uri.parse('$_baseUrl/cards'));
-      // if (response.statusCode != 200) {
-      //   throw Exception('Failed to fetch cards: ${response.statusCode}');
-      // }
-      // final data = json.decode(response.body);
-
-      final List<dynamic> cardsJson = mockResponse['data'] as List;
-      return cardsJson.map((cardJson) {
-        final decryptedData = _encryptionService.decryptMap(cardJson, _sensitiveFields);
-        return LoyaltyCard.fromJson(decryptedData);
-      }).toList();
-    } catch (e) {
-      print('Error fetching cards: $e');
-      throw Exception('Failed to fetch cards: $e');
-    }
-  }
-
-  // push a new card to server
+  
+  // simulate pushing a single card to the server
   Future<bool> pushCard(LoyaltyCard card) async {
-    if (!await isConnected()) {
-      return false; // can't sync without connection
-    }
-
-    try {
-      // encrypt sensitive fields before sending
-      final cardJson = card.toJson();
-      final encryptedData = _encryptionService.encryptMap(cardJson, _sensitiveFields);
-      
-      // simulate API call with delay
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      // in real app, make actual http request
-      // final response = await http.post(
-      //   Uri.parse('$_baseUrl/cards'),
-      //   headers: {'Content-Type': 'application/json'},
-      //   body: json.encode(encryptedData),
-      // );
-      // return response.statusCode == 201;
-      
-      // mock successful response
-      return true;
-    } catch (e) {
-      print('Error pushing card: $e');
+    // simulate network delay
+    await Future.delayed(Duration(milliseconds: 300 + _random.nextInt(700)));
+    
+    // simulate occasional failure (10% chance)
+    if (_random.nextInt(10) == 0) {
       return false;
     }
+    
+    return true;
   }
-
-  // sync offline changes with server
-  Future<List<String>> syncOfflineChanges(List<LoyaltyCard> offlineCards) async {
-    if (!await isConnected()) {
-      return []; // can't sync without connection
-    }
-
-    final List<String> syncedCardIds = [];
+  
+  // simulate fetching all cards from the server
+  Future<List<LoyaltyCard>> fetchCards() async {
+    // simulate network delay
+    await Future.delayed(Duration(milliseconds: 500 + _random.nextInt(1000)));
     
-    for (final card in offlineCards) {
-      if (!card.isSynced) {
-        final success = await pushCard(card);
-        if (success) {
-          syncedCardIds.add(card.id);
-        }
+    // in a real app, this would fetch cards from a server
+    // for demo purposes, return an empty list
+    return [];
+  }
+  
+  // simulate syncing offline changes to the server
+  Future<List<String>> syncOfflineChanges(List<LoyaltyCard> cards) async {
+    // simulate network delay
+    await Future.delayed(Duration(milliseconds: 500 + _random.nextInt(1000)));
+    
+    // get unsynced cards
+    final unsyncedCards = cards.where((card) => !card.isSynced).toList();
+    
+    // pretend we successfully synced most of them
+    final syncedIds = <String>[];
+    for (final card in unsyncedCards) {
+      // simulate occasional failure (10% chance)
+      if (_random.nextInt(10) != 0) {
+        syncedIds.add(card.id);
       }
+      
+      // simulate network delay between cards
+      await Future.delayed(Duration(milliseconds: 100));
     }
     
-    return syncedCardIds;
+    return syncedIds;
   }
 
   // sync card data between local and remote

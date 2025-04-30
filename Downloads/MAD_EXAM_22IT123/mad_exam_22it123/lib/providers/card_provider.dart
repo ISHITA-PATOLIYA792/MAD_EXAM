@@ -8,6 +8,7 @@ import 'package:mad_exam_22it123/models/loyalty_card.dart';
 import 'package:mad_exam_22it123/services/encryption_service.dart';
 import 'package:mad_exam_22it123/services/sync_service.dart';
 import 'package:mad_exam_22it123/services/notification_service.dart';
+import 'package:mad_exam_22it123/services/mock_data_service.dart';
 
 // Manual Hive adapter for LoyaltyCard
 class LoyaltyCardAdapter extends TypeAdapter<LoyaltyCard> {
@@ -169,6 +170,17 @@ class CardProvider with ChangeNotifier {
       // load cards from box
       _cards = box.values.toList();
       
+      // If no cards exist, add sample cards (for demo purposes)
+      if (_cards.isEmpty) {
+        final sampleCards = MockDataService.getSampleCards();
+        for (final card in sampleCards) {
+          // Cards will be encrypted when added
+          await addCard(card);
+        }
+        // Reload cards from box after adding samples
+        _cards = box.values.toList();
+      }
+      
       // check for expiring cards
       _notificationService.checkForExpiringCards(_cards);
       
@@ -255,17 +267,43 @@ class CardProvider with ChangeNotifier {
   // delete a card
   Future<void> deleteCard(String id) async {
     try {
-      // remove from local storage
+      // delete from local storage
       final box = await Hive.openBox<LoyaltyCard>(_boxName);
       await box.delete(id);
       
-      // remove from cards list
+      // delete from cards list
       _cards.removeWhere((card) => card.id == id);
       notifyListeners();
-      
-      // sync deletion with server (in a real app)
     } catch (e) {
       _setError('Failed to delete card: $e');
+    }
+  }
+  
+  // reset database and reload sample cards
+  Future<void> resetAndLoadSampleCards() async {
+    try {
+      _setLoading(true);
+      
+      // clear local storage
+      final box = await Hive.openBox<LoyaltyCard>(_boxName);
+      await box.clear();
+      
+      // clear cards list
+      _cards = [];
+      
+      // add sample cards
+      final sampleCards = MockDataService.getSampleCards();
+      for (final card in sampleCards) {
+        await addCard(card);
+      }
+      
+      // reload cards from box
+      _cards = box.values.toList();
+      
+      _setLoading(false);
+      notifyListeners();
+    } catch (e) {
+      _setError('Failed to reset database: $e');
     }
   }
   
